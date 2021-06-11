@@ -21,3 +21,16 @@
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
+
+# project files
+/target/
+/map/
+/.vscode/
+jgpstrackedit*.log
+MapExtracts.dat
+JGPSTrackEdit.properties
+.idea
+.iml
+.settings
+.classpath
+.project

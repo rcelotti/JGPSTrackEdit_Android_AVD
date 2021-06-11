@@ -1,0 +1,35 @@
+{  
+   "elevationProfile":[  
+      {  
+         "distance":0,
+         "height":626
+      },
+      {  
+         "distance":0.0563,
+         "height":623
+      },
+      {  
+         "distance":0.1126,
+         "height":-32768
+      },
+      {  
+         "distance":0.1667,
+         "height":-32768
+      },
+      {  
+         "distance":0.2553,
+         "height":627
+      }
+   ],
+   "info":{  
+      "statuscode":602,
+      "copyright":{  
+         "imageAltText":"© 2018 MapQuest, Inc.",
+         "imageUrl":"http://api.mqcdn.com/res/mqlogo.gif",
+         "text":"© 2018 MapQuest, Inc."
+      },
+      "messages":[  
+         "Partial Success: Some elevations were found but others were not within the SRTM coverage."
+      ]
+   }
+}
