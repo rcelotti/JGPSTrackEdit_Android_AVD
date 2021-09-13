@@ -14,7 +14,48 @@
         </encoder>
     </appender>
 
-    <root level="info">
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- encoders are assigned the type
+             ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+        <encoder>
+          <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{5} - %msg%n</pattern>
+        </encoder>
+      </appender>
+
+
+      <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>
+                %d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <appender name="MEMORY" class="com.optimizely.intellij.plugin.utils.LogAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>
+                %d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <logger name="jgpstrackedit" level="debug" additivity="false">
+        <appender-ref ref="MEMORY"/>
+    </logger>
+
+     
+      <!-- Strictly speaking, the level attribute is not necessary since -->
+      <!-- the level of the root level is set to DEBUG by default.       -->
+      <root level="DEBUG">          
+        <appender-ref ref="STDOUT" />
+      </root>  
+      
+<!--
+
+
+      <root level="info">
         <appender-ref ref="FILE" />
     </root>
+-->
+
 </configuration>

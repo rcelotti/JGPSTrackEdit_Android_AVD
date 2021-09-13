@@ -46,6 +46,9 @@ import java.io.IOException;
 import java.util.*;
 import java.net.*;
 import java.io.*;
+import java.text.DecimalFormat;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 
 /** 
  * TODO:
@@ -2127,7 +2130,8 @@ public class JGPSTrackEdit extends javax.swing.JFrame implements
 
 
 
-    private final long MILLISECONDS_BETWEEN_COORDS = 1500;
+    private final long MILLISECONDS_BETWEEN_COORDS = 2100;
+    private final int INTERPOLATED_COORDS_COUNT = 2;
     private final String AVD_AUTH_TOKEN = "khSdwYrgWtTRexHe";
     private final String AVD_HOST = "localhost";
     private final int AVD_PORT = 5554;
@@ -2174,23 +2178,49 @@ public class JGPSTrackEdit extends javax.swing.JFrame implements
                 public void run() {
                     int[] sel = jTablePoints.getSelectionModel().getSelectedIndices();
                     int idx = (sel.length > 0) ? sel[0] : 0;
-                    while (androidGeoFixIsRunning) {                        
+                    Point ptSource = null;
+                    NMEASentenceSender nmeaPrinter = new NMEASentenceSender(out, in);
+                    while (androidGeoFixIsRunning) {
                         while (idx < selectedTrack.getPoints().size()) {
-                            Point pt = selectedTrack.getPoints().get(idx);
+                            Point ptTarget = selectedTrack.getPoints().get(idx);
                             jTablePoints.getSelectionModel().setSelectionInterval(idx, idx);
                             jTablePoints.scrollRectToVisible(jTablePoints.getCellRect(idx, 0, true));
                             jTablePoints.repaint();
-                            
-                            String s = String.format(Locale.US, "geo fix %.6f %.6f", pt.getLongitude(), pt.getLatitude());
-                            out.println(s);                            
+
                             try {
-                                String resp = in.readLine();
-                                Thread.sleep(MILLISECONDS_BETWEEN_COORDS);
+                                for (int i = 0; i < INTERPOLATED_COORDS_COUNT; ++i) {
+                                    double d = (double) i / (double) INTERPOLATED_COORDS_COUNT;
+                                    double lon = ptSource != null 
+                                        ? ptSource.getLongitude() + d * (ptTarget.getLongitude() - ptSource.getLongitude())
+                                        : ptTarget.getLongitude();
+                                    double lat = ptSource != null 
+                                        ? ptSource.getLatitude() + d * (ptTarget.getLatitude() - ptSource.getLatitude())
+                                        : ptTarget.getLatitude();
+                                    Point pt = new Point(lon, lat);
+
+                                    double speedMpS = 0;
+                                    double headingMagnetic = 0;
+                                    double headingTrue = 0;
+
+                                    // String s = nmeaPrinter.send(pt.getLatitude(), pt.getLongitude(), speedMpS, headingMagnetic, headingTrue);
+
+                                    String s = String.format(Locale.US, "geo fix %.6f %.6f", pt.getLongitude(), pt.getLatitude());
+                                    out.println(s);
+                                    in.readLine();
+
+                                    // sensor set acceleration 2.23517e-07:9.77631:0.812348
+                                    // geo nmea $GPRMC,<Time>,<Status>,<Latitude>,<Longitude>,<Speed>,<Angle>,<Date>,<Variation>,<Integrity>,<Checksum>                                    
+
+                                    logger.info(s);
+                                    Thread.sleep(MILLISECONDS_BETWEEN_COORDS / INTERPOLATED_COORDS_COUNT);
+                                }
+                                
                                 while (androidGeoFixIsPause) {
                                     Thread.sleep(1000);
                                 }
                             } catch (InterruptedException | IOException e) {
                                 e.printStackTrace();
+                                logger.error("Exception while setting look and feel!", e);
                             }
                             if (!androidGeoFixIsRunning) {
                                 break;
@@ -2203,6 +2233,7 @@ public class JGPSTrackEdit extends javax.swing.JFrame implements
                             else {
                                 idx = i;
                             }
+                            ptSource = ptTarget;
                         }
                         idx = 0;
                         // out.println("geo fix 13.25 52.31");
@@ -2227,6 +2258,222 @@ public class JGPSTrackEdit extends javax.swing.JFrame implements
         }
         catch(Exception ignored) {}
     }
+
+
+    private static class NMEASentenceSender {
+        public static final int FORMAT_DEGREES = 0;
+        public static final int FORMAT_MINUTES = 1;
+        public static final int FORMAT_SECONDS = 2;
+        
+        private final DateFormat utc_time_fmt = new SimpleDateFormat("HHmmss");
+        private final DateFormat utc_date_fmt = new SimpleDateFormat("ddMMyy");
+
+        private final PrintWriter out;
+        private final BufferedReader in;
+
+        NMEASentenceSender(PrintWriter out, BufferedReader in) {
+            this.out = out;
+            this.in = in;
+        }
+
+        String send(double lat, double lon, 
+                  double speedMpS, 
+                  double headingMagnetic, double headingTrue) throws IOException
+        {
+            String latitude = toNmeaLatitudeFormat(lat);
+            String north_south = "S";
+            if (lat > 0) {
+                north_south = "N";
+            }
+
+            String longitude = toNmeaLongitudeFormat(lon);
+            String east_west = "W";
+            if (lon > 0) {
+                east_west = "E";
+            }
+
+            final Date now = new Date();
+
+            String utc_time = utc_time_fmt.format(now);
+            String utc_date = utc_date_fmt.format(now);
+            String data_valid = "A";
+            String heading_magnetic = String.format(Locale.US, "%.1f", headingMagnetic);
+            String heading_true = String.format(Locale.US, "%.1f", headingTrue);
+            // Simulation speed is knots. Convert to km/h
+            // double s_kmh = speedKnots * 1.852;
+            double s_kmh = speedMpS * 3.6;
+            double s_knots = speedMpS * 1.944;
+            String speed_kmh = String.format(Locale.US, "%.1f", s_kmh);
+            String speed_knots = String.format(Locale.US, "%.1f", s_knots);
+
+            String gpgll = "geo nmea $GPGLL," + latitude + "," + north_south + "," + longitude + "," + east_west + "," + utc_time + "," + data_valid;
+            String gpgga = "geo nmea $GPGGA," + utc_time + "," + latitude + "," + north_south + "," + longitude + "," + east_west + ",1,12,1.5,0.0,M,0.0,M,";
+            String cksum = calculateChecksum(gpgga);
+            gpgga = gpgga + "*" + cksum;
+
+            String gpvtd = "geo nmea $GPVTD," + heading_true + ",T," + heading_magnetic + ",M," + (int)s_knots + ",N," + speed_kmh + ",K";
+            cksum = calculateChecksum(gpvtd);
+            gpvtd = gpvtd + "*" + cksum;
+
+            String gprmc = "geo nmea $GPRMC," + utc_time + "," + data_valid + "," + latitude + "," + north_south + "," + longitude + "," + east_west + "," + speed_knots + "," + heading_true + "," + utc_date + ",0,E";
+            cksum = calculateChecksum(gprmc);
+            gprmc = gprmc + "*" + cksum;
+
+            String retVal = "";
+
+            /*
+            out.println(gpgll);
+            retVal += gpgll + "\n";
+            in.readLine();
+            */
+
+            out.println(gpgga);
+            retVal += gpgga + "\n";
+            in.readLine();
+
+            /*
+            out.println(gpvtd);
+            retVal += gpvtd + "\n";
+            in.readLine();
+            */
+
+            out.println(gprmc);
+            retVal += gprmc + "\n";
+            in.readLine();
+
+            return retVal;
+        }
+
+
+        public String convert(double coordinate, int outputType) {
+            if (coordinate < -180.0 || coordinate > 180.0 ||
+                Double.isNaN(coordinate)) {
+                throw new IllegalArgumentException("coordinate=" + coordinate);
+            }
+            if ((outputType != FORMAT_DEGREES) &&
+                (outputType != FORMAT_MINUTES) &&
+                (outputType != FORMAT_SECONDS)) {
+                throw new IllegalArgumentException("outputType=" + outputType);
+            }
+
+            final StringBuilder sb = new StringBuilder();
+
+            // Handle negative values
+            if (coordinate < 0) {
+                sb.append('-');
+                coordinate = -coordinate;
+            }
+
+            DecimalFormat df = new DecimalFormat("###.#####");
+            if (outputType == FORMAT_MINUTES || outputType == FORMAT_SECONDS) {
+                int degrees = (int) Math.floor(coordinate);
+                sb.append(degrees);
+                sb.append(':');
+                coordinate -= degrees;
+                coordinate *= 60.0;
+                if (outputType == FORMAT_SECONDS) {
+                    int minutes = (int) Math.floor(coordinate);
+                    sb.append(minutes);
+                    sb.append(':');
+                    coordinate -= minutes;
+                    coordinate *= 60.0;
+                }
+            }
+            sb.append(df.format(coordinate));
+            return sb.toString();
+        }
+
+
+
+        /** 
+         * Calculate checksums for NMEA 0183 sentences. basically what you do
+         * is to XOR every byte starting from the second (the one after the "$")
+         * So - take the second byte, XOR with third, then XOR the result with fourth
+         * and so on until done. Return the two-digit hex value of the checksum.
+         */
+        protected String calculateChecksum(String data) {
+            byte[] array = data.getBytes();
+            byte cksum = array[1];
+            for (int i = 2; i < data.length(); i++) {
+                int one = (int) cksum;
+                int two = (int) array[i];
+                int xor = one ^ two;
+                cksum = (byte) (0xff & xor);
+            }
+            return String.format("%02X ", cksum).trim();
+        }
+
+        /**
+         * Convert longitude from decimal degrees to the format expected in NMWEA 0183 sentences.
+         */
+        protected String toNmeaLongitudeFormat(double longitude) {
+            longitude = Math.abs(longitude);
+            final StringBuilder sb = new StringBuilder();
+            int deg = (int) Math.floor(longitude);
+            sb.append(String.format("%03d", deg));
+            longitude -= deg;
+            longitude *= 60.0;
+            DecimalFormat df = new DecimalFormat("##.####");
+            sb.append(df.format(longitude));
+            return sb.toString();
+
+            /*
+            double d1 = Math.abs(longitude);
+            double d2 = d1 % 1;
+            int d3 = (int) Math.round(d2 * 60);
+            String minutes = String.format("%02d", d3);
+
+            double d4 = Math.abs(d2 * 60);
+            double d5 = d4 % 1;
+            String d6 = String.format("%.4f", d5);
+            String s = d6.substring(d6.indexOf(".") + 1, d6.length());
+
+            // int d = (int) Math.round(Math.abs(longitude));
+            String degree = String.format("%03d", deg);
+            return degree + minutes + "." + s;
+            */
+        }
+
+        /**
+         * Convert latitude from decimal degrees to the format expected in NMWEA 0183 sentences.
+         */
+        protected String toNmeaLatitudeFormat(double latitude) {
+            latitude = Math.abs(latitude);
+            final StringBuilder sb = new StringBuilder();
+            int deg = (int) Math.floor(latitude);
+            sb.append(String.format("%02d", deg));
+            latitude -= deg;
+            latitude *= 60.0;
+            DecimalFormat df = new DecimalFormat("##.####");
+            sb.append(df.format(latitude));
+            return sb.toString();
+
+            /*
+
+            double d1 = Math.abs(latitude);
+            double d2 = d1 % 1;
+            int d3 = (int) Math.round(d2 * 60);
+            String minutes = String.format("%02d", d3);
+
+            double d4 = Math.abs(d2 * 60);
+            double d5 = d4 % 1;
+            String d6 = String.format("%.4f", d5);
+            String s = d6.substring(d6.indexOf(".") + 1, d6.length());
+
+            int d = (int) Math.round(Math.abs(latitude));
+            String degree = String.format("%02d", d);
+            return degree + minutes + "." + s;
+            */
+        }
+    }
+
+
+
+
+
+
+
+
 
 
 
